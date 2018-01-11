@@ -1,0 +1,10 @@
+fastq_files/Yr1P8_Bact.fastq	fasta_files/Yr1P8_Bact
+fastq_files/Yr1P8_Arch.fastq	fasta_files/Yr1P8_Arch
+fastq_files/Yr1P2_Bact.fastq	fasta_files/Yr1P2_Bact
+fastq_files/Yr1P2_Arch.fastq	fasta_files/Yr1P2_Arch
+fastq_files/Yr1P1_8_Arch_redo_purpool.fastq	fasta_files/Yr1P1_8_Arch_redo_purpool
+fastq_files/Yr1P1_P8_Bact_redos.fastq	fasta_files/Yr1P1_P8_Bact_redos
+fastq_files/Yr1P4_Bact.fastq	fasta_files/Yr1P4_Bact
+fastq_files/Yr1P4_Arch.fastq	fasta_files/Yr1P4_Arch
+fastq_files/Yr1P3_Bact.fastq	fasta_files/Yr1P3_Bact
+fastq_files/Yr1P3_Arch.fastq	fasta_files/Yr1P3_Arch

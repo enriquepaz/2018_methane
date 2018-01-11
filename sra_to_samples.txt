@@ -1,0 +1,10 @@
+SRR6042378.fastq	Yr1P8_Bact.fastq
+SRR6042379.fastq	Yr1P8_Arch.fastq
+SRR6042380.fastq	Yr1P2_Bact.fastq
+SRR6042381.fastq	Yr1P2_Arch.fastq
+SRR6042382.fastq	Yr1P1_8_Arch_redo_purpool.fastq
+SRR6042383.fastq	Yr1P1_P8_Bact_redos.fastq
+SRR6042384.fastq	Yr1P4_Bact.fastq
+SRR6042385.fastq	Yr1P4_Arch.fastq
+SRR6042386.fastq	Yr1P3_Bact.fastq
+SRR6042387.fastq	Yr1P3_Arch.fastq
