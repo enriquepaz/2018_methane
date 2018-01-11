@@ -1,0 +1,133 @@
+---
+Title: "bact_taxa_beta_diversity"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+    keep_md: yes
+---
+
+Summarize taxa.
+
+```{r, engine='bash'}
+#summarize taxa
+summarize_taxa_through_plots.py -i biom_files/arch_otutable_final_rarefied.biom -o arch_taxa_summary
+```
+
+Class stacked bar graph.
+
+```{r}
+#load packages
+library(tidyr)
+library(ggplot2)
+
+#create data set
+taxa_arch <- read.table("taxa_files/arch_otutable_final_rarefied_L3.txt", sep="\t", header=T)
+
+#convert data from wide to long format
+plot_taxa_long_arch <- gather(taxa_arch, Samples, Proportion, X8794.3.d21.HQ40MDGSNoRum:X8937.8.d63.40DRC)
+
+#phyla stacked bar graph
+graph_arch <- ggplot(plot_taxa_long_arch, aes(x=Samples, y=Proportion, fill=Class)) + geom_bar(stat="identity", width=1.0) + theme(axis.line=element_line(color="black", size=1), axis.text.x=element_blank(), axis.text.y=element_text(color="black", size=12, face="bold"), axis.title=element_text(color="black", size=12, face="bold"), legend.title=element_text(color="black", size=12, face="bold", hjust=0.5), legend.text=element_text(color="black", size=10, face="bold")) + scale_fill_manual(values=c("#FFFF00","#008000","#FF0000","#E6E6FA","#800080","#000080")) + scale_y_continuous(expand = c(0, 0), limits = c(0, 1.01))
+
+#generate figure
+pdf("figures/figure7.pdf", height=6, width=12)
+graph_arch
+dev.off()
+```
+
+Create core file.
+
+```{r, engine='bash'}
+#filter samples with sequence depth lower than 3181
+filter_samples_from_otu_table.py -i biom_files/arch_otutable_final.biom -n 3181 -o biom_files/arch_otutable_final_depth.biom
+
+#split normalized OTU table by forage quality
+split_otu_table.py -i biom_files/arch_otutable_final_depth.biom -m mapping_files/arch_mapping.txt -f TrtForageQuality -o arch_split_fq
+
+#create core files
+filter_otus_from_otu_table.py -i arch_split_fq/arch_otutable_final_depth__TrtForageQuality_LowQuality__.biom -s 113 -o cores/arch_core_fqlowqual.biom 
+
+filter_otus_from_otu_table.py -i arch_split_fq/arch_otutable_final_depth__TrtForageQuality_HighQuality__.biom -s 71 -o cores/arch_core_fqlhighqual.biom 
+
+#merge core files
+merge_otu_tables.py -i cores/arch_core_fqlowqual.biom,cores/arch_core_fqlhighqual.biom -o cores/arch_merged_coresfq.biom
+
+#convert from biom to txt
+biom convert -i cores/arch_merged_coresfq.biom -o cores/arch_merged_coresfq.txt --to-tsv
+```
+
+Create core OTUs list.
+
+```{r}
+#create core OTUs list
+arch_cores <- read.table("cores/arch_merged_coresfq.txt", sep="\t", header=F)
+arch_cores_sub <- arch_cores[, 1]
+write.table(arch_cores_sub, file="filter/arch_core_filter.txt", col.names=F, row.names=F)
+```
+
+Normalize core OTU table and calculate beta diversity.
+
+```{r, engine='bash'}
+#filter core OTUs
+filter_otus_from_otu_table.py -i biom_files/arch_otutable_final_depth.biom --otu_ids_to_exclude_fp filter/arch_core_filter.txt --negate_ids_to_exclude -o biom_files/arch_core.biom
+
+#normalize otu table using cumulative sum scaling
+normalize_table.py -i biom_files/arch_core.biom -a CSS -o biom_files/arch_css_core.biom 
+
+#add  beta diversity metrics to QIIME parameters file
+echo 'beta_diversity:metrics bray_curtis,unweighted_unifrac,weighted_unifrac' >> arch_qiime_parameters.txt
+
+#Calculate beta diversity
+beta_diversity_through_plots.py -i biom_files/arch_css_core.biom -t vsearch_outputs/arch_oturep_header.phylip.tre -m mapping_files/arch_mapping.txt -p arch_qiime_parameters.txt -o arch_beta_div_css_core
+
+sed 's/#SampleID/SampleID/g' mapping_files/arch_mapping.txt > r_inputs/arch_mapping.txt
+```
+
+Run PERMANOVA.
+
+```{r}
+#load packages
+library(vegan)
+
+#create data set
+arch_mapping <- read.table("r_inputs/arch_mapping.txt", sep="\t", header=T)
+arch_mapping$Animal <- as.factor(arch_mapping$Animal)
+arch_mapping$Time <- as.factor(arch_mapping$Time)
+
+#distance matrix
+arch_dm_weighted <- read.table("arch_beta_div_css_core/weighted_unifrac_dm.txt", sep="\t", header=T)
+
+#match order of mapping file sample IDs with distance matirx sample IDs
+arch_mapping = arch_mapping[match(arch_dm_weighted$X, arch_mapping$SampleID), ]
+row.names(arch_dm_weighted) <- arch_dm_weighted$X
+arch_dm_weighted <- arch_dm_weighted[, -1]
+arch_dm_weighted <- as.dist(arch_dm_weighted)
+
+#run PERMANOVA
+adonis(arch_dm_weighted ~ TrtForageQuality*TrtMonensin*Time + Animal, permutations=999, data=arch_mapping)
+```
+
+PCoA plot.
+
+```{r}
+#load packages
+library(ggplot2)
+
+#create data set
+arch_unifrac <- read.table("arch_beta_div_css_core/weighted_unifrac_pc.txt", sep="\t", skip=9, nrows=230)
+pc_vectors <- arch_unifrac[, c("V1", "V2", "V3")]
+colnames(pc_vectors) <- c("SampleID", "PC1", "PC2")
+
+arch_mapping <- read.table("r_inputs/arch_mapping.txt", sep="\t", header=T, stringsAsFactors=F)
+arch_sub <- arch_mapping[,c("SampleID","TrtForageQuality")]
+
+arch_pcoa_data <- merge(pc_vectors, arch_sub,by="SampleID")
+
+#generate PCoA plot
+arch_pcoa_plot <- ggplot(arch_pcoa_data, aes(x=PC1, y=PC2, shape=TrtForageQuality, color=TrtForageQuality)) + geom_point(size=2.5) + labs(title="", x="PC1 (49.6%)", y="PC2 (8.63%)", shape="Forage Quality", color="Forage Quality") + theme(plot.title=element_text(color="black", size=12, face="bold", hjust=0.5), axis.line=element_line(color="black", size=1), axis.ticks=element_line(color="black"), axis.text=element_text(color="black", size=12, face="bold"), axis.title=element_text(color="black", size=12, face="bold"), legend.title=element_text(color="black", size=10, face="bold"), legend.text=element_text(color="black", size=9, face="bold"), legend.position=c(0.95,0.82), legend.justification=c(0.85,0)) + scale_shape_manual(values=c(15, 16), labels=c("High Quality", "Low Quality")) + scale_colour_manual(values=c("#008000", "#FF0000"), labels=c("High Quality", "Low Quality"))
+
+#generate figure
+pdf("figures/figure8.pdf", height=6, width=6)
+arch_pcoa_plot
+dev.off()
+```

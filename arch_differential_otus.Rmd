@@ -1,0 +1,272 @@
+---
+Title: "arch_differential_OTUs"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+  keep_md: yes
+---
+
+Generate archaea relative abundance OTU table.
+
+```{r, engine='bash'}
+#convert from biom to txt
+biom convert -i biom_files/arch_otutable_final_rarefied.biom --to-tsv --header-key taxonomy -o biom_files/arch_otutable_final_rarefied.txt
+```
+
+```{r}
+#load packages
+library(tidyverse)
+
+##create data set 
+arch_otutable <- read_tsv("biom_files/arch_otutable_final_rarefied.txt", skip=1)
+
+arch_otuid_tax <- arch_otutable[,c(1,232)]
+arch_samples <- arch_otutable[,-c(1,232)]
+
+#relative abundance
+arch_relabundance <- arch_samples %>%
+  mutate_all(funs(. / sum(.)))
+
+arch_relabun_otutable <- merge(arch_otuid_tax, arch_relabundance, by="row.names", all=T) 
+arch_relabun_otutable <- arch_relabun_otutable[,-1]
+
+#make taxonomy last column
+arch_relabun_otutable <- arch_relabun_otutable %>%
+  select(-taxonomy, taxonomy)
+
+#generate file
+write_tsv(arch_relabun_otutable, "biom_files/arch_relabun_otutable.txt", col_names=T)
+```
+
+Generate archaea discovery population.
+
+```{r, engine='bash'}
+#convert from biom to txt
+biom convert -i biom_files/arch_relabun_otutable.txt --to-json --table-type="OTU table" --process-obs-metadata taxonomy -o biom_files/arch_relabun_otutable.biom
+
+#filter core OTUs
+filter_otus_from_otu_table.py -i biom_files/arch_relabun_otutable.biom --otu_ids_to_exclude_fp filter/arch_core_filter.txt --negate_ids_to_exclude -o biom_files/arch_relabun_core.biom
+
+#create discovery data set
+filter_samples_from_otu_table.py -i biom_files/arch_relabun_core.biom --sample_id_fp filter/total_extremes.txt -o biom_files/arch_relabun_discovery.biom
+
+biom convert -i biom_files/arch_relabun_discovery.biom --to-tsv --header-key taxonomy -o biom_files/arch_relabun_discovery.txt
+
+sed 's/#OTU ID/OTUID/g' biom_files/arch_relabun_discovery.txt > r_inputs/arch_relabun_discovery.txt
+``` 
+
+Generate LEfSe input file.
+
+```{r}
+library(tidyverse)
+
+##create data set archaea mapping 
+arch_mapping <- read_tsv("r_inputs/arch_mapping.txt") %>% 
+  select(SampleID, TrtForageQuality)
+
+##create data set archeria extremes
+arch_extremes <- read_tsv("filter/total_extremes.txt", col_names = ("SampleID")) 
+
+#merge data sets 
+arch_trt <- left_join(arch_extremes, arch_mapping, by = "SampleID") 
+
+#remove samples 
+arch_trt <- arch_trt %>%
+  filter(SampleID != "8995.8.d63.HQNoRum" & SampleID != "8814.8.d63.HQ40MDGSRum" & SampleID != "8798.2.d63.20DeoiledMDGS")
+
+#transpose data set
+arch_trt_trans <- arch_trt %>%
+  t %>%
+  as.data.frame(stringsAsFactors=F)
+
+#set column names
+colnames(arch_trt_trans) = arch_trt_trans[1, ]
+arch_trt_trans = arch_trt_trans[-1, ]
+
+#add OTUID and taxonomy columns to match relative abundance column headers
+arch_trt_trans <- arch_trt_trans %>%
+  mutate(OTUID = "ForageQuality",
+         taxonomy = "") 
+
+##create data set archeria discovery set
+arch_discovery <- read_tsv("r_inputs/arch_relabun_discovery.txt", skip=1) 
+
+#merge data sets 
+arch_lefse <- rbind(arch_trt_trans, arch_discovery) 
+
+#lefse format
+arch_lefse <- arch_lefse %>% 
+  select(-taxonomy) %>% 
+  select(OTUID, everything()) 
+
+arch_lefse[nrow(arch_lefse) + 1, ] <- colnames(arch_lefse)
+
+arch_lefse <- arch_lefse[c(1,163,2:162),]
+
+#generate file
+write_tsv(arch_lefse, "lefse/arch_lefse_input.txt", col_names = F)
+```
+
+Identify archae differentially abundant OTUs. Results from LEfSe are provided in the Github [repository](https://github.com/enriquepaz/2018_methane_steers) within the lefse directory and were generated as described below.
+
+```{r, engine='bash', eval=FALSE}
+#convert the input data to LEfSe format
+lefse-format_input.py lefse/arch_lefse_input.txt lefse/arch_lefse_inputin.txt -c 1 -u 2 -o 1000000
+
+#performs LEfSe statistical analyses
+run_lefse.py lefse/arch_lefse_inputin.txt lefse/arch_lefse_output.txt -a 1.0 -w 1.0 -l 0.0 --wilc 1 -y 1
+```
+
+Subset significant differentially abundant OTUs.
+
+```{r}
+#load packages
+library(tidyverse)
+
+##create data set 
+arch_lefse <- read_tsv("lefse/arch_lefse_output.txt", col_names=c("OTUid", "loghighestclassaverage", "class", "LDA", "Pvalue"))
+
+arch_lefse$OTUid <- gsub("f_","", arch_lefse$OTUid)
+
+#adjust p-values using the Benjamini & Hochberg alias false discivery rate
+arch_lefse <- arch_lefse %>%
+  arrange (Pvalue) %>%
+  mutate (fdr = p.adjust(Pvalue, method = "fdr"))
+
+#filter significant differentially abundant OTUs
+arch_differential <- arch_lefse %>%
+  filter (LDA >=2 & fdr <= 0.05 ) %>%
+  select (OTUid)
+
+#generate file
+write_tsv(arch_differential, "lefse/arch_differential_otus.txt", col_names = F)
+```
+
+Generate heatmaps.
+
+```{r, engine='bash'}
+##create data set 
+filter_otus_from_otu_table.py -i biom_files/arch_relabun_discovery.biom -e lefse/arch_differential_otus.txt --negate_ids_to_exclude -o biom_files/arch_differential_otus_table.biom
+
+#Convert from biom to txt format 
+biom convert -i biom_files/arch_differential_otus_table.biom --to-tsv --header-key taxonomy -o biom_files/arch_differential_otus_table.txt
+```
+
+```{r}
+library(tidyverse)
+library(gplots)
+library(Heatplus)
+library(vegan)
+library(RColorBrewer)
+
+#generate heatmap for all data bacteria
+##create data set differential otus
+arch_diff_otus <- read_tsv("biom_files/arch_differential_otus_table.txt", skip=1) 
+
+arch_genus <- arch_diff_otus %>%
+  rename(OTUID = "#OTU ID") %>% 
+  separate(taxonomy,
+           into = c("kingdom","phylum","class","order","family","genus","specie"),
+           sep=";") %>%
+  select(-c(kingdom,phylum,class,order,family,specie))
+
+#format genus column data
+arch_genus$genus <- gsub("^\\s","", arch_genus$genus)
+arch_genus$genus <- gsub("g__","", arch_genus$genus)
+arch_genus$genus <- gsub("\\[","", arch_genus$genus)
+arch_genus$genus <- gsub("\\]","", arch_genus$genus)
+arch_genus$genus <- gsub("^k.*","", arch_genus$genus) 
+arch_genus$genus <- gsub("^p.*","", arch_genus$genus) 
+arch_genus$genus <- gsub("^c.*","", arch_genus$genus) 
+arch_genus$genus <- gsub("^o.*","", arch_genus$genus) 
+arch_genus$genus <- gsub("^f.*","", arch_genus$genus) 
+arch_genus$genus <- gsub("^$","Unclassified", arch_genus$genus)
+
+#format to data frame
+arch_genus_df <- as.data.frame(arch_genus)
+row.names(arch_genus_df) <- arch_genus_df$OTUID
+arch_genus_df <- arch_genus_df[, -1]
+
+#obtain treatment metadata from mapping file
+##create data set archeria mapping file
+arch_mapping <- read_tsv("r_inputs/arch_mapping.txt") %>% 
+  select(SampleID, TrtForageQuality)
+
+##create data set archeria extremes
+arch_extremes <- read_tsv("filter/total_extremes.txt", col_names = ("SampleID"))
+
+#merge data sets 
+arch_trt <- left_join(arch_extremes, arch_mapping, by = "SampleID") 
+
+#remove samples 
+arch_trt <- arch_trt %>%
+  filter(SampleID != "8995.8.d63.HQNoRum" & SampleID != "8814.8.d63.HQ40MDGSRum" & SampleID != "8798.2.d63.20DeoiledMDGS")
+
+#transpose data set
+arch_trt_trans <- arch_trt %>%
+  t %>%
+  as.data.frame(stringsAsFactors=F)
+
+#set column names
+colnames(arch_trt_trans) = arch_trt_trans[1, ]
+arch_trt_trans = arch_trt_trans[-1, ]
+
+#add genus column to match relative abundance column headers
+arch_trt_trans <- arch_trt_trans %>%
+  mutate(genus = "genus") 
+
+#merge differentila OTUs and treatment metadata sets 
+arch_genus_trt <- rbind(arch_trt_trans, arch_genus_df) 
+trtnames <- arch_genus_trt[1,1:63]
+arch_genus_trt <- arch_genus_trt[-1,]
+arch_taxa <- subset(arch_genus_trt, select=c(genus))
+arch_samples = arch_genus_trt[,-64]
+colnames(arch_samples) <- trtnames
+arch_samples_trans <- as.data.frame(t(arch_samples), stringsAsFactors=F)
+
+#convert data frame to numeric
+arch_samples_trans[, 1:19] <- sapply(arch_samples_trans[, 1:19], as.numeric)
+
+#add a dendrogram for the samples
+#calculate the Bray-Curtis dissimilarity matrix on the full dataset
+data.dist <- vegdist(arch_samples_trans, method = "bray")
+
+#average linkage hierarchical clustering
+row.clus <- hclust(data.dist, "aver")
+
+#add a dendrogram for the taxa
+data.dist.g <- vegdist(t(arch_samples_trans), method = "bray")
+col.clus <- hclust(data.dist.g, "aver")
+
+#color palette
+scalewhiteblue <- colorRampPalette(c("white", "blue"), space = "rgb")(100)
+
+#generate figure
+pdf("figures/figure11a.pdf", height=8, width=9)
+heatmap.2(as.matrix(arch_samples_trans), Rowv = as.dendrogram(row.clus), Colv = as.dendrogram(col.clus), labCol="", xlab="OTUs", ylab="Forage Quality", col = scalewhiteblue, trace="none", density.info="none", margins = c(2, 6), lhei = c(2, 10))
+dev.off()
+
+#generate heatmap for subset data archeria
+#determine the maximum relative abundance for each column
+maxab <- apply(arch_samples_trans, 2, max)
+
+#remove the genera with less than 1% as their maximum relative abundance
+n1 <- names(which(maxab < 0.01))
+arch_samples_filtered <- arch_samples_trans[, -which(names(arch_samples_trans) %in% n1)]
+
+#add a dendrogram for the samples
+#calculate the Bray-Curtis dissimilarity matrix on the full dataset
+data.dist_sub <- vegdist(arch_samples_filtered, method = "bray")
+
+#average linkage hierarchical clustering
+row.clus_sub <- hclust(data.dist_sub, "aver")
+
+#add a dendrogram for the taxa
+data.dist.g_sub <- vegdist(t(arch_samples_filtered), method = "bray")
+col.clus_sub <- hclust(data.dist.g_sub, "aver")
+
+#generate figure
+pdf("figures/figure11b.pdf", height=10, width=9)
+heatmap.2(as.matrix(arch_samples_filtered), Rowv = as.dendrogram(row.clus_sub), Colv = as.dendrogram(col.clus_sub), labCol=arch_taxa$genus, xlab="OTUs", ylab="Forage Quality", col = scalewhiteblue, trace="none", density.info="none", margins = c(12, 6), lhei = c(2, 10))
+dev.off()
+```

@@ -1,0 +1,139 @@
+---
+Title: "bact_taxa_beta_diversity"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+    keep_md: yes
+---
+
+Summarize taxa.
+
+```{r, engine='bash'}
+#summarize taxa
+summarize_taxa_through_plots.py -i biom_files/bact_otutable_final_rarefied.biom -o bac_taxa_summary
+```
+
+Phyla stacked bar graph.
+
+```{r}
+#load packages
+library(tidyr)
+library(ggplot2)
+
+#create data set
+taxa_bact <- read.table("taxa_files/bact_otutable_final_rarefied_L2.txt", sep="\t", header=T) 
+
+#convert data from wide to long format
+plot_taxa_long_bact <- gather(taxa_bact, Samples, Proportion, X8809.3.d21.LQ40MDGSNoRum:X8856.8.d63.HQ40MDGSRum)
+
+#phyla stacked bar graph
+graph_bact <- ggplot(plot_taxa_long_bact, aes(x=Samples, y=Proportion, fill=Phyla)) + geom_bar(stat="identity", width=1.0) + theme(axis.line=element_line(color="black", size=1), axis.text.x=element_blank(), axis.text.y=element_text(color="black", size=12, face="bold"), axis.title=element_text(color="black", size=12, face="bold"), legend.title=element_text(color="black", size=12, face="bold", hjust=0.5), legend.text=element_text(color="black", size=10, face="bold")) + scale_fill_manual(values=c("#B8860B","#000080","#C0C0C0","#800000","#800080","#008000","#8B0000","#FF1493","#F5F5DC","#E6E6FA","#808080","#FFFF00","#FA8072","#00FF00","#0000FF","#FF00FF","#808000","#FF0000","#FFA500")) + scale_y_continuous(expand = c(0, 0), limits = c(0, 1.01))
+
+#generate figure
+pdf("figures/figure5.pdf", height=6, width=12)
+graph_bact
+dev.off()
+```
+
+Create core file.
+
+```{r, engine='bash'}
+#filter samples with sequence depth lower than 6934 
+filter_samples_from_otu_table.py -i biom_files/bact_otutable_final.biom -n 6934 -o biom_files/bact_otutable_final_depth.biom
+
+#split equal depth OTU table by forage quality
+split_otu_table.py -i biom_files/bact_otutable_final_depth.biom -m mapping_files/bact_mapping.txt -f TrtForageQuality -o bact_split_fq
+
+#make cores directory
+mkdir cores
+
+#create core files
+filter_otus_from_otu_table.py -i bact_split_fq/bact_otutable_final_depth__TrtForageQuality_LowQuality__.biom -s 110 -o cores/bact_core_fqlowqual.biom 
+
+filter_otus_from_otu_table.py -i bact_split_fq/bact_otutable_final_depth__TrtForageQuality_HighQuality__.biom -s 74 -o cores/bact_core_fqlhighqual.biom 
+
+#merge core files
+merge_otu_tables.py -i cores/bact_core_fqlowqual.biom,cores/bact_core_fqlhighqual.biom -o cores/bact_merged_coresfq.biom
+
+#convert from biom to txt
+biom convert -i cores/bact_merged_coresfq.biom -o cores/bact_merged_coresfq.txt --to-tsv
+```
+
+Create core OTUs list.
+
+```{r}
+#create core OTUs list
+bact_cores <- read.table("cores/bact_merged_coresfq.txt", sep="\t", header=F)
+bact_cores_sub <- bact_cores[, 1]
+write.table(bact_cores_sub, file="filter/bact_core_filter.txt", col.names=F, row.names=F)
+```
+
+Normalize core OTU table and calculate beta diversity.
+
+```{r, engine='bash'}
+#filter core OTUs
+filter_otus_from_otu_table.py -i biom_files/bact_otutable_final_depth.biom --otu_ids_to_exclude_fp filter/bact_core_filter.txt --negate_ids_to_exclude -o biom_files/bact_core.biom
+
+#normalize otu table using cumulative sum scaling
+normalize_table.py -i biom_files/bact_core.biom -a CSS -o biom_files/bact_css_core.biom 
+
+#add  beta diversity metrics to QIIME parameters file
+echo 'beta_diversity:metrics bray_curtis,unweighted_unifrac,weighted_unifrac' >> bact_qiime_parameters.txt
+
+#calculate beta diversity
+beta_diversity_through_plots.py -i biom_files/bact_css_core.biom -t vsearch_outputs/bact_oturep_header.phylip.tre -m mapping_files/bact_mapping.txt -p bact_qiime_parameters.txt -o bact_beta_div_css_core
+
+#make r_inputs directory
+mkdir r_inputs
+
+sed 's/#SampleID/SampleID/g' mapping_files/bact_mapping.txt > r_inputs/bact_mapping.txt
+```
+
+Run PERMANOVA.
+
+```{r}
+#load packages
+library(vegan)
+
+#create data set
+bact_mapping <- read.table("r_inputs/bact_mapping.txt", sep="\t", header=T)
+bact_mapping$Animal <- as.factor(bact_mapping$Animal)
+bact_mapping$Time <- as.factor(bact_mapping$Time)
+
+#distance matrix
+bact_dm_weighted <- read.table("bact_beta_div_css_core/weighted_unifrac_dm.txt", sep="\t", header=T)
+
+#match order of mapping file sample IDs with distance matirx sample IDs
+bact_mapping = bact_mapping[match(bact_dm_weighted$X, bact_mapping$SampleID), ]
+row.names(bact_dm_weighted) <- bact_dm_weighted$X
+bact_dm_weighted <- bact_dm_weighted[, -1]
+bact_dm_weighted <- as.dist(bact_dm_weighted)
+
+#run PERMANOVA
+adonis(bact_dm_weighted ~ TrtForageQuality*TrtMonensin*Time + Animal, permutations=999, data=bact_mapping)
+```
+
+PCoA plot.
+
+```{r}
+#load packages
+library(ggplot2)
+
+#create data set for heifer cohort
+bact_unifrac <- read.table("bact_beta_div_css_core/weighted_unifrac_pc.txt", sep="\t", skip=9, nrows=230)
+pc_vectors <- bact_unifrac[, c("V1", "V2", "V3")]
+colnames(pc_vectors) <- c("SampleID", "PC1", "PC2")
+
+bact_mapping <- read.table("r_inputs/bact_mapping.txt", sep="\t", header=T, stringsAsFactors=F)
+bact_sub <- bact_mapping[,c("SampleID","TrtForageQuality")]
+
+bact_pcoa_data <- merge(pc_vectors, bact_sub,by="SampleID")
+
+#generate PCoA plot
+bact_pcoa_plot <- ggplot(bact_pcoa_data, aes(x=PC1, y=PC2, shape=TrtForageQuality, color=TrtForageQuality)) + geom_point(size=2.5) + labs(title="", x="PC1 (42.1%)", y="PC2 (7.61%)", shape="Forage Quality", color="Forage Quality") + theme(plot.title=element_text(color="black", size=12, face="bold", hjust=0.5), axis.line=element_line(color="black", size=1), axis.ticks=element_line(color="black"), axis.text=element_text(color="black", size=12, face="bold"), axis.title=element_text(color="black", size=12, face="bold"), legend.title=element_text(color="black", size=10, face="bold"), legend.text=element_text(color="black", size=9, face="bold"), legend.position=c(0.95,0.05), legend.justification=c(1,0)) + scale_shape_manual(values=c(15, 16), labels=c("High Quality", "Low Quality")) + scale_colour_manual(values=c("#008000", "#FF0000"), labels=c("High Quality", "Low Quality"))
+
+#generate figure
+pdf("figures/figure6.pdf", height=6, width=6)
+bact_pcoa_plot
+dev.off()
+```

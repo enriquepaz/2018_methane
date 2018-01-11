@@ -1,0 +1,98 @@
+---
+Title: "Assign Taxonomy and Perform Alignment for Bacteria Sequences"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+    keep_md: yes
+---
+
+Assing taxonomy to the OTUs representative sequences using Greengenes database (gg_13_8_otus) as reference.
+
+```{r, engine='bash'}
+#assign taxonomy
+assign_taxonomy.py -i vsearch_outputs/bact_oturep_header.fasta -t anaconda/envs/bioinfo/lib/python2.7/site-packages/qiime_default_reference/gg_13_8_otus/taxonomy/97_otu_taxonomy.txt -r anaconda/envs/bioinfo/lib/python2.7/site-packages/qiime_default_reference/gg_13_8_otus/rep_set/97_otus.fasta -m mothur -o bact_ggtaxa
+```
+
+Retain OTUs present in both the OTU table and the OTUs representative sequence set.
+
+```{r}
+#make r_outputs directory
+dir.create("r_outputs")
+
+bact_oturep <- read.table("bact_ggtaxa/bact_oturep_header_tax_assignments.txt", header=F, sep="\t")
+bact_table <- read.table("otu_tables/bact_otutable.txt", header=T, sep="\t")
+
+matched_otus <- bact_oturep[which(bact_oturep$V1 %in% bact_table$OTUId),]
+write.table(matched_otus, sep="\t", file="r_outputs/bact_oturep_tax_assignments_filtered.txt", col.names=F, row.names=F)
+```
+
+Add the assigned taxa to the OTU table with the column header "taxonomy" and output the resulting file in biom format.
+
+```{r, engine='bash'}
+#add the assigned taxonomy to OTU table
+awk 'NR == 1; NR > 1 {print $0 | "sort -n"}' otu_tables/bact_otutable.txt > bact_ggtaxa/bact_otutablesort.txt 
+ 
+sort -n r_outputs/bact_oturep_tax_assignments_filtered.txt > bact_ggtaxa/bact_oturep_tax_assignments_filtered_sort.txt
+
+{ printf '\ttaxonomy\t\t\n'; cat bact_ggtaxa/bact_oturep_tax_assignments_filtered_sort.txt ; } > bact_ggtaxa/bact_oturep_tax_assignments_filtered_sort_label.txt
+
+#make biom_files directory
+mkdir biom_files
+
+paste bact_ggtaxa/bact_otutablesort.txt <(cut -f 2 bact_ggtaxa/bact_oturep_tax_assignments_filtered_sort_label.txt) > biom_files/bact_otutable_tax.txt
+
+#convert to biom format
+biom convert -i biom_files/bact_otutable_tax.txt --table-type "OTU table" --process-obs-metadata taxonomy --to-json -o biom_files/bact_otutable_tax.biom 
+```
+
+Align sequences and view the alignment summary.
+
+```{r, engine='bash'}
+#make silva directory
+mkdir silva
+
+#download and decompress Silva database
+wget https://www.mothur.org/w/images/b/b4/Silva.nr_v128.tgz -P silva
+
+tar -zxvf silva/Silva.nr_v128.tgz -C silva
+
+#align sequences and view the alignment summary
+mothur "#align.seqs(fasta=vsearch_outputs/bact_oturep_header.fasta, reference=silva/silva.nr_v128.align, processors=8)"
+
+mothur "#summary.seqs(fasta=vsearch_outputs/bact_oturep_header.align)"
+```
+
+Identify OTUs that aligned properly.
+
+```{r}
+summarybact <- read.table("vsearch_outputs/bact_oturep_header.summary", header=T, sep="\t")
+
+summarybact_sub <- subset(summarybact, (start >= 6400 & start <= 8000) & end == 13125, select=seqname)
+
+write.table(summarybact_sub, file="r_outputs/proper_aligned_otus_bact.txt", col.names=F, row.names=F)
+```
+
+Remove those OTUs that did not align properly from the OTU table and then remove OTUs with Cyanobacteria classification. VSEARCH pipeline should have removed sinlgeton OTUs, but double check with the (-n 2 parameter). In addition, the OTU table contains additinal samples not part of the current analysis that need to be filtered. 
+
+```{r, engine='bash'}
+#filter OTUs that did not align properly and singletons
+filter_otus_from_otu_table.py -i biom_files/bact_otutable_tax.biom -n 2 -e r_outputs/proper_aligned_otus_bact.txt --negate_ids_to_exclude -o biom_files/bact_otutable_tax_align.biom
+
+#filter OTUs with Cyanobacteria classification 
+filter_taxa_from_otu_table.py -i biom_files/bact_otutable_tax_align.biom -n p__Cyanobacteria -o biom_files/bact_otutable_tax_align_cyan.biom
+
+#filter samples not part of the analysis
+filter_samples_from_otu_table.py -i biom_files/bact_otutable_tax_align_cyan.biom --sample_id_fp filter/bact_filter_samples.txt --negate_sample_id_fp -o biom_files/bact_otutable_final.biom
+```
+
+Use the aligned file to generate a phylogenetic tree using clearcut in mothur. Note that using the unfiltered aligned file does not affect downstream results. Clearcut requires ID lengths greater than ~10 characters, thus add 10 ’A’s to the front of all sequence names. Then remove the ’A’s from the generated phylogenetic tree.
+
+```{r, engine='bash'}
+sed -i -e 's/>/>AAAAAAAAAA/g' vsearch_outputs/bact_oturep_header.align
+
+mothur "#dist.seqs(fasta=vsearch_outputs/bact_oturep_header.align, output=lt)"
+
+mothur "#clearcut(phylip=vsearch_outputs/bact_oturep_header.phylip.dist)"
+
+sed -i -e 's/AAAAAAAAAA//g' vsearch_outputs/bact_oturep_header.phylip.tre
+```

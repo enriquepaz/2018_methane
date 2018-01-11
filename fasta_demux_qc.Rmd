@@ -1,0 +1,84 @@
+---
+Title: "Generate fasta files, demultiplex libraries, and perform quality-filtering"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+    keep_md: yes
+---
+
+Generate fasta and qual files from fastq files.
+
+```{r, engine='bash'}
+#make fasta_files directory
+mkdir fasta_files
+
+#generate fasta and qual files
+while read fastq fasta
+do
+    for file in $fastq
+    do
+        convert_fastaqual_fastq.py -c fastq_to_fastaqual -f ${file} -o ${fasta}
+    done
+done < fastq_to_fasta.txt
+```
+
+Demultiplex libraries, remove barcode and linkerprimer sequences, and quality-filtering.
+
+```{r, engine='bash'}
+#make demultiplexed_files directory
+mkdir demultiplexed_files
+
+#demultiplex libraries, remove barcode and linkerprimer sequences, and perform quality-filtering 
+while read fna mapping demux
+do
+    for file in $fna
+    do
+        split_libraries.py -f ${file} -b variable_length -l 0 -L 1000 -x -M 1 -m ${mapping} -o ${demux}
+    done
+done < fasta_to_demux.txt
+```
+
+Truncate the reverse primer and subsequent sequences.
+
+```{r, engine='bash'}
+#make revprimer_truncated directory
+mkdir revprimer_truncated
+
+#Truncate the reverse primer and subsequent sequences
+while read demux mapping truncated
+do
+    for file in $demux
+    do
+        truncate_reverse_primer.py -f ${file} -m ${mapping} -z truncate_only -M 2 -o ${truncated}
+    done
+done < demux_to_revprimertruncated.txt
+```
+
+Trim to specified length and reverse complement sequences.
+
+```{r, engine='bash'}
+#make concatenated_files directory
+mkdir concatenated_files
+
+#concatenate bacteria fasta files
+cat revprimer_truncated/truncated_Yr1P3_Bact/seqs_rev_primer_truncated.fna revprimer_truncated/truncated_Yr1P4_Bact/seqs_rev_primer_truncated.fna revprimer_truncated/truncated_Yr1P1_P8_Bact_redos/seqs_rev_primer_truncated.fna revprimer_truncated/truncated_Yr1P2_Bact/seqs_rev_primer_truncated.fna revprimer_truncated/truncated_Yr1P8_Bact/seqs_rev_primer_truncated.fna > concatenated_files/bactqc_seqs.fna
+
+#concatenate archaea fasta files
+cat revprimer_truncated/truncated_Yr1P3_Arch/seqs_rev_primer_truncated.fna revprimer_truncated/truncated_Yr1P4_Arch/seqs_rev_primer_truncated.fna revprimer_truncated/truncated_Yr1P1_8_Arch_redo_purpool/seqs_rev_primer_truncated.fna revprimer_truncated/truncated_Yr1P2_Arch/seqs_rev_primer_truncated.fna revprimer_truncated/truncated_Yr1P8_Arch/seqs_rev_primer_truncated.fna > concatenated_files/archqc_seqs.fna
+
+#determine trimming sequence length
+mothur "#summary.seqs(fasta=concatenated_files/bactqc_seqs.fna)"
+mothur "#summary.seqs(fasta=concatenated_files/archqc_seqs.fna)"
+
+#cull sequences shorter than specified sequence length
+mothur "#trim.seqs(fasta=concatenated_files/bactqc_seqs.fna, minlength=130)"
+mothur "#trim.seqs(fasta=concatenated_files/archqc_seqs.fna, minlength=140)"
+
+#trim sequences to specified length
+fastx_trimmer -i concatenated_files/bactqc_seqs.trim.fasta -l 130 -o bactqc_trim.fasta
+fastx_trimmer -i concatenated_files/archqc_seqs.trim.fasta -l 140 -o archqc_trim.fasta
+
+#reverse complement sequences
+mothur "#reverse.seqs(fasta=bactqc_trim.fasta)"
+mothur "#reverse.seqs(fasta=archqc_trim.fasta)"
+```

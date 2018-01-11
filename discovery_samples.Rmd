@@ -1,0 +1,88 @@
+---
+Title: "discovery_samples"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+  keep_md: yes
+---
+
+Determine discovery data set.
+
+```{r}
+#load packages
+library(tidyverse)
+library(ggplot2)
+
+##create data set high forage quality
+map_bact <- read_tsv("mapping_files/bact_mapping.txt")
+
+#subset TrtForageQuality (High and Low)
+foragehl <- map_bact %>%
+  filter(TrtForageQuality!="none") 
+  
+#data distribution
+density_trth <- ggplot(foragehl, aes(x=MethaneRatioFinal, fill=TrtForageQuality)) + labs(x=expression(bold('Ratio (CH'[4]*'/CO'[2]*')')), y="Density", fill="Forage Quality") + theme(axis.line=element_line(color="black", size=1), axis.ticks=element_line(color="black"), axis.text=element_text(color="black", size=12, face="bold"), axis.title=element_text(color="black", size=12, face="bold"), legend.title=element_text(color="black", size=12, face="bold"), legend.text=element_text(color="black", size=10, face="bold")) + scale_fill_manual(values=c("#008000","#FF0000"), labels=c("High Quality","Low Quality")) + geom_density(alpha=.5) + xlim(0.03, 0.16) + scale_y_continuous(expand = c(0, 0), limits = c(0, 30.5)) 
+
+#generate figure
+pdf("figures/figure9.pdf", height=6, width=8)
+density_trth
+dev.off()
+
+##create data set for high quality forage
+#subset TrtForageQuality (High)
+forageh <- foragehl %>%
+  na.omit() %>%
+  filter(TrtForageQuality=="HighQuality") 
+
+#descriptive statistics
+forageh_stats<- forageh %>%
+  summarize(mean_fh = mean(MethaneRatioFinal),
+            sd_fh = sd(MethaneRatioFinal),
+            min_fh = min(MethaneRatioFinal),
+            max_fh = max(MethaneRatioFinal),
+            total_fh = n())
+
+#remove outliers 
+fh_outlierneg <- forageh_stats$mean_fh-(forageh_stats$sd_fh*3)
+fh_outlierpos <- forageh_stats$mean_fh+(forageh_stats$sd_fh*3)
+
+foragehfinal <- forageh %>%
+  filter(MethaneRatioFinal >= fh_outlierneg & MethaneRatioFinal <= fh_outlierpos)
+
+#select the lower and upper 15 percentiles and generate file 
+foragehfinal %>%
+  filter(MethaneRatioFinal < quantile(MethaneRatioFinal, prob=0.15) | MethaneRatioFinal > quantile(MethaneRatioFinal, prob=0.85)) %>%
+  select("#SampleID") %>% write_tsv(., "filter/forageh_extremes.txt", col_names=F)
+
+##create data set for low quality forage
+#subset TrtForageQuality (Low)
+foragel <- foragehl %>%
+  na.omit() %>%
+  filter(TrtForageQuality=="LowQuality") 
+
+#descriptive statistics
+foragel_stats<- foragel %>%
+  summarize(mean_fl = mean(MethaneRatioFinal),
+            sd_fl = sd(MethaneRatioFinal),
+            min_fl = min(MethaneRatioFinal),
+            max_fl = max(MethaneRatioFinal),
+            total_fl = n())
+
+#remove outliers 
+fl_outlierneg <- foragel_stats$mean_fl-(foragel_stats$sd_fl*3)
+fl_outlierpos <- foragel_stats$mean_fl+(foragel_stats$sd_fl*3)
+
+foragelfinal <- foragel %>%
+  filter(MethaneRatioFinal >= fl_outlierneg & MethaneRatioFinal <= fl_outlierpos)
+
+#select the lower and upper 15 percentiles and generate file
+foragelfinal %>%
+  filter(MethaneRatioFinal < quantile(MethaneRatioFinal, prob=0.15) | MethaneRatioFinal > quantile(MethaneRatioFinal, prob=0.85)) %>%
+  select("#SampleID") %>% write_tsv(., "filter/foragel_extremes.txt", col_names=F)
+```
+
+Merge files.
+
+```{r, engine='bash'}
+cat filter/forageh_extremes.txt filter/foragel_extremes.txt | uniq > filter/total_extremes.txt
+```

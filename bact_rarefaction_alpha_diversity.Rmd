@@ -1,0 +1,145 @@
+---
+Title: "bact_rarefaction_alpha_diversity"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+    keep_md: yes
+---
+
+Generates rarefaction plots.
+
+```{r, engine='bash'}
+#add  alpha_diversity metrics to QIIME parameters file
+echo 'alpha_diversity:metrics observed_otus' > bact_qiime_parameters.txt
+
+#summarize sequence depth across samples
+biom summarize-table -i biom_files/bact_otutable_final.biom -o biom_files/bact_otutable_final_summary.txt
+
+#rarefy to equal sequence depth
+single_rarefaction.py -i biom_files/bact_otutable_final.biom -d 6934 -o biom_files/bact_otutable_final_rarefied.biom
+
+#alpha rarefaction plot
+alpha_rarefaction.py -i biom_files/bact_otutable_final_rarefied.biom -m mapping_files/bact_mapping.txt --min_rare_depth 1 -n 10 -p bact_qiime_parameters.txt -o bact_alpha_rarefaction_plots_even
+```
+
+Alpha rarefaction plots.
+
+```{r}
+#load packages
+library(XML)
+library(ggplot2)
+library(matrixStats)
+library(plyr)
+
+#create data set
+rare_bact <- readHTMLTable("bact_alpha_rarefaction_plots_even/alpha_rarefaction_plots/rarefaction_plots.html", stringsAsFactors = F)
+rare_bact$rare_data[rare_bact$rare_data == "nan"] <- 0
+alpha_rare_bact <- as.data.frame(rare_bact$rare_data)
+alpha_rare_bact_sub <- alpha_rare_bact[1:22,1:4]
+colnames(alpha_rare_bact_sub)[2] <- "seqs.sample"
+colnames(alpha_rare_bact_sub)[3] <- "observed_otus.ave"
+colnames(alpha_rare_bact_sub)[4] <- "observed_otus.err"
+
+#change to numeric variables
+cols.num <- c("seqs.sample", "observed_otus.ave", "observed_otus.err")
+alpha_rare_bact_sub[cols.num] <- sapply(alpha_rare_bact_sub[cols.num],as.numeric)
+pd <- position_dodge(width=275)
+
+#rarefaction plot
+bact_observed_otus <- ggplot(alpha_rare_bact_sub, aes(x=seqs.sample, y=observed_otus.ave, color=TrtForageQuality, ymin=observed_otus.ave - observed_otus.err, ymax=observed_otus.ave + observed_otus.err)) + geom_line(position=pd, size=1) + geom_pointrange(position=pd) + labs(title="", x="Sequences per Sample", y="Observed OTUs", color="Forage Quality") + theme(plot.title=element_text(color="black", size=12, face="bold", hjust=0.5), axis.line=element_line(color="black", size=1), axis.ticks=element_line(color="black"), axis.text=element_text(color="black", size=12, face="bold"), axis.title=element_text(color="black", size=12, face="bold"), legend.title=element_text(color="black", size=10, face="bold"), legend.text=element_text(color="black", size=9, face="bold"), legend.position=c(0.95,0.05), legend.justification=c(1,0)) + scale_color_manual(values=c("#008000", "#FF0000"), labels=c("High Quality", "Low Quality"))
+
+#make figures directory
+dir.create("figures")
+
+#generate figure
+pdf("figures/figure1.pdf", height=6, width=6)
+bact_observed_otus
+dev.off()
+```
+
+Calculate alpha diversity metrics.
+
+```{r, engine='bash'}
+#rarefy to equal sequence depth
+multiple_rarefactions_even_depth.py -i biom_files/bact_otutable_final.biom -d 6934 -n 15 -o bact_mult_rarefied_even
+
+#calculate alpha diversity metrcis
+alpha_diversity.py -i bact_mult_rarefied_even/ -m observed_otus,shannon,dominance,goods_coverage -o bact_mult_rarefied_even_alpha/
+
+#concatenate alpha diversity files by metric
+collate_alpha.py -i bact_mult_rarefied_even_alpha/ -o bact_collated_even_alpha/
+
+#compare alpha diversity metrics across forage quality trts
+compare_alpha_diversity.py -i bact_collated_even_alpha/observed_otus.txt -m mapping_files/bact_mapping.txt -c TrtForageQuality -d 6934 -p fdr -o bact_alpha_observed_otus
+
+compare_alpha_diversity.py -i bact_collated_even_alpha/shannon.txt -m mapping_files/bact_mapping.txt -c TrtForageQuality -d 6934 -p fdr -o bact_alpha_shannon
+
+compare_alpha_diversity.py -i bact_collated_even_alpha/dominance.txt -m mapping_files/bact_mapping.txt -c TrtForageQuality -d 6934 -p fdr -o bact_alpha_dominance
+
+compare_alpha_diversity.py -i bact_collated_even_alpha/goods_coverage.txt -m mapping_files/bact_mapping.txt -c TrtForageQuality -d 6934 -p fdr -o bact_alpha_goods
+```
+
+Boxplot alpha metrics.
+
+```{r}
+#load packages
+library(ggplot2)
+
+#create data sets 
+alpha_observedotus_bact <- read.table("bact_collated_even_alpha/observed_otus.txt", sep="\t", header=T, stringsAsFactors=F)
+alpha_observedotus_bact <- alpha_observedotus_bact[,4:233]
+mean_observedotus_bact <- data.frame(colMeans(alpha_observedotus_bact))
+
+alpha_shannon_bact <- read.table("bact_collated_even_alpha/shannon.txt", sep="\t", header=T, stringsAsFactors=F)
+alpha_shannon_bact <- alpha_shannon_bact[,4:233]
+mean_shannon_bact <- data.frame(colMeans(alpha_shannon_bact))
+
+alpha_dominance_bact <- read.table("bact_collated_even_alpha/dominance.txt", sep="\t", header=T, stringsAsFactors=F)
+alpha_dominance_bact <- alpha_dominance_bact[,4:233]
+mean_dominance_bact <- data.frame(colMeans(alpha_dominance_bact))
+
+mapping_bact <- read.table("mapping_files/bact_mapping.txt", sep="\t", header=F, stringsAsFactors=F)
+row.names(mapping_bact) <- mapping_bact$V1
+rownames(mapping_bact) <- paste("X", rownames(mapping_bact), sep="")
+mapping_bact <- mapping_bact[,-1]
+
+#merge data sets
+list_bact <- list(mean_observedotus_bact,mean_shannon_bact,mean_dominance_bact,mapping_bact)
+data_bact <- Reduce(merge, lapply(list_bact, function(x) data.frame(x, rn = row.names(x))))
+data_bact_sub <- data_bact[,c(1,2,3,4,14)]
+colnames(data_bact_sub) <- c("Sample", "ObservedOTUs", "Shannon", "Dominance","ForageQuality")
+
+#generate alpha diversity metrics boxplots
+bact_observedotus <- ggplot(data_bact_sub, aes(x=factor(ForageQuality), y=ObservedOTUs)) + geom_boxplot() + geom_jitter() + labs(title="", x="Forage Quality", y="Observed OTUs") + theme(plot.title=element_text(color="black", size=14, face="bold", hjust=0.5), axis.line=element_line(color="black", size=1), axis.ticks=element_line(color="black", size=1), axis.text=element_text(color="black", size=12, face="bold"), axis.title=element_text(color="black", size=12, face="bold")) + scale_x_discrete(labels=c("High Quality", "Low Quality")) + stat_summary(fun.y="mean", geom="point", shape=23, size=3, fill="black") 
+
+bact_dominance <- ggplot(data_bact_sub, aes(x=factor(ForageQuality), y=Dominance)) + geom_boxplot() + geom_jitter() + labs(title="", x="Forage Quality", y="Dominance") + theme(plot.title=element_blank(), axis.line=element_line(color="black", size=1), axis.ticks=element_line(color="black", size=1), axis.text=element_text(color="black", size=12, face="bold"), axis.title=element_text(color="black", size=12, face="bold")) + scale_x_discrete(labels=c("High Quality", "Low Quality")) + stat_summary(fun.y="mean", geom="point", shape=23, size=3, fill="black")
+
+bact_shannon <- ggplot(data_bact_sub, aes(x=factor(ForageQuality), y=Shannon)) + geom_boxplot() + geom_jitter() + labs(title="", x="Forage Quality", y="Shannon") + theme(plot.title=element_blank(), axis.line=element_line(color="black", size=1), axis.ticks=element_line(color="black", size=1), axis.text=element_text(color="black", size=12, face="bold"), axis.title=element_text(color="black", size=12, face="bold")) + scale_x_discrete(labels=c("High Quality", "Low Quality")) + stat_summary(fun.y="mean", geom="point", shape=23, size=3, fill="black")
+
+#Multiplot function
+multiplot <- function(..., plotlist = NULL, file, cols = 1, layout = NULL) {
+  library(grid)
+  plots <- c(list(...), plotlist)
+  numPlots = length(plots)
+  if (is.null(layout)) {
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)), ncol = cols, 
+                     nrow = ceiling(numPlots/cols))
+  }
+  if (numPlots == 1) {
+    print(plots[[1]])
+  } else {
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+    for (i in 1:numPlots) {
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+      
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row, layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+#generate figure
+pdf("figures/figure2.pdf", height=6, width=15)
+multiplot(bact_observedotus,bact_shannon,bact_dominance, cols=3)
+dev.off()
+```

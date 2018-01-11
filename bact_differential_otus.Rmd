@@ -1,0 +1,276 @@
+---
+Title: "bact_differential_OTUs"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+  keep_md: yes
+---
+
+Generate bacteria relative abundance OTU table.
+
+```{r, engine='bash'}
+#convert from biom to txt
+biom convert -i biom_files/bact_otutable_final_rarefied.biom --to-tsv --header-key taxonomy -o biom_files/bact_otutable_final_rarefied.txt
+```  
+
+```{r}
+#load packages
+library(tidyverse)
+
+##create data set 
+bact_otutable <- read_tsv("biom_files/bact_otutable_final_rarefied.txt", skip=1)
+
+bact_otuid_tax <- bact_otutable[,c(1,232)]
+bact_samples <- bact_otutable[,-c(1,232)]
+
+#relative abundance
+bact_relabundance <- bact_samples %>%
+  mutate_all(funs(. / sum(.)))
+
+bact_relabun_otutable <- merge(bact_otuid_tax, bact_relabundance, by="row.names", all=T) 
+bact_relabun_otutable <- bact_relabun_otutable[,-1]
+
+#make taxonomy last column
+bact_relabun_otutable <- bact_relabun_otutable %>%
+  select(-taxonomy, taxonomy)
+
+#generate file
+write_tsv(bact_relabun_otutable, "biom_files/bact_relabun_otutable.txt", col_names=T)
+```
+
+Generate bacteria discovery population.
+
+```{r, engine='bash'}
+#convert from biom to txt
+biom convert -i biom_files/bact_relabun_otutable.txt --to-json --table-type="OTU table" --process-obs-metadata taxonomy -o biom_files/bact_relabun_otutable.biom
+
+#filter core OTUs
+filter_otus_from_otu_table.py -i biom_files/bact_relabun_otutable.biom --otu_ids_to_exclude_fp filter/bact_core_filter.txt --negate_ids_to_exclude -o biom_files/bact_relabun_core.biom
+
+#create discovery data set
+filter_samples_from_otu_table.py -i biom_files/bact_relabun_core.biom --sample_id_fp filter/total_extremes.txt -o biom_files/bact_relabun_discovery.biom
+
+#Convert from biom to txt format 
+biom convert -i biom_files/bact_relabun_discovery.biom --to-tsv --header-key taxonomy -o biom_files/bact_relabun_discovery.txt
+
+sed 's/#OTU ID/OTUID/g' biom_files/bact_relabun_discovery.txt > r_inputs/bact_relabun_discovery.txt
+``` 
+
+Generate LEfSe input file.
+
+```{r}
+library(tidyverse)
+
+##create data set bactera mapping 
+bact_mapping <- read_tsv("r_inputs/bact_mapping.txt") %>% 
+  select(SampleID, TrtForageQuality)
+
+##create data set bacteria extremes
+bact_extremes <- read_tsv("filter/total_extremes.txt", col_names = ("SampleID")) 
+
+#merge data sets 
+bact_trt <- left_join(bact_extremes, bact_mapping, by = "SampleID") 
+
+#remove samples 
+bact_trt <- bact_trt %>%
+  filter(SampleID != "8791.8.d63.20NormalMDGS" & SampleID != "8847.2.d63.HQ40MDGSNoRum" & SampleID != "8997.8.d63.20NormalMDGS")
+
+#transpose data set
+bact_trt_trans <- bact_trt %>%
+  t %>%
+  as.data.frame(stringsAsFactors=F)
+
+#set column names
+colnames(bact_trt_trans) = bact_trt_trans[1, ]
+bact_trt_trans = bact_trt_trans[-1, ]
+
+#add OTUID and taxonomy columns to match relative abundance column headers
+bact_trt_trans <- bact_trt_trans %>%
+  mutate(OTUID = "ForageQuality",
+         taxonomy = "") 
+
+##create data set bacteria discovery set
+bact_discovery <- read_tsv("r_inputs/bact_relabun_discovery.txt", skip=1) 
+
+#merge data sets 
+bact_lefse <- rbind(bact_trt_trans, bact_discovery) 
+
+#lefse format
+bact_lefse <- bact_lefse %>% 
+  select(-taxonomy) %>% 
+  select(OTUID, everything()) 
+
+bact_lefse[nrow(bact_lefse) + 1, ] <- colnames(bact_lefse)
+
+bact_lefse <- bact_lefse[c(1,574,2:573),]
+
+#generate file
+write_tsv(bact_lefse, "lefse/bact_lefse_input.txt", col_names = F)
+```
+
+Identify bacterial differentially abundant OTUs. Results from LEfSe are provided in the Github [repository](https://github.com/enriquepaz/2018_methane_steers) within the lefse directory and were generated as described below.
+
+```{r, engine='bash', eval=FALSE}
+#convert the input data to LEfSe format
+lefse-format_input.py lefse/bact_lefse_input.txt lefse/bact_lefse_inputin.txt -c 1 -u 2 -o 1000000
+
+#performs LEfSe statistical analyses
+run_lefse.py lefse/bact_lefse_inputin.txt lefse/bact_lefse_output.txt -a 1.0 -w 1.0 -l 0.0 --wilc 1 -y 1
+```
+
+Subset significant differentially abundant OTUs.
+
+```{r}
+#load packages
+library(tidyverse)
+
+##create data set 
+bact_lefse <- read_tsv("lefse/bact_lefse_output.txt", col_names=c("OTUid", "loghighestclassaverage", "class", "LDA", "Pvalue"))
+
+bact_lefse$OTUid <- gsub("f_","", bact_lefse$OTUid)
+
+#adjust p-values using the Benjamini & Hochberg alias false discivery rate
+bact_lefse <- bact_lefse %>%
+  arrange (Pvalue) %>%
+  mutate (fdr = p.adjust(Pvalue, method = "fdr"))
+
+#filter significant differentially abundant OTUs
+bact_differential <- bact_lefse %>%
+  na.omit() %>% 
+  filter (LDA >=2 & fdr <= 0.05 ) %>%
+  arrange (desc(LDA)) %>% 
+  slice(1:80) %>% 
+  select (OTUid)
+
+#generate file
+write_tsv(bact_differential, "lefse/bact_differential_otus.txt", col_names = F)
+```
+
+Generate heatmaps.
+
+```{r, engine='bash'}
+##create data set 
+filter_otus_from_otu_table.py -i biom_files/bact_relabun_discovery.biom -e lefse/bact_differential_otus.txt --negate_ids_to_exclude -o biom_files/bact_differential_otus_table.biom
+
+#Convert from biom to txt format 
+biom convert -i biom_files/bact_differential_otus_table.biom --to-tsv --header-key taxonomy -o biom_files/bact_differential_otus_table.txt
+```
+
+```{r}
+library(tidyverse)
+library(gplots)
+library(Heatplus)
+library(vegan)
+library(RColorBrewer)
+
+#generate heatmap for all data bacteria
+##create data set differential otus
+bact_diff_otus <- read_tsv("biom_files/bact_differential_otus_table.txt", skip=1) 
+
+bact_genus <- bact_diff_otus %>%
+  rename(OTUID = "#OTU ID") %>% 
+  separate(taxonomy,
+           into = c("kingdom","phylum","class","order","family","genus","specie"),
+           sep=";") %>%
+  select(-c(kingdom,phylum,class,order,family,specie))
+
+#format genus column data
+bact_genus$genus <- gsub("^\\s","", bact_genus$genus)
+bact_genus$genus <- gsub("g__","", bact_genus$genus)
+bact_genus$genus <- gsub("\\[","", bact_genus$genus)
+bact_genus$genus <- gsub("\\]","", bact_genus$genus)
+bact_genus$genus <- gsub("^k.*","", bact_genus$genus) 
+bact_genus$genus <- gsub("^p.*","", bact_genus$genus) 
+bact_genus$genus <- gsub("^c.*","", bact_genus$genus) 
+bact_genus$genus <- gsub("^o.*","", bact_genus$genus) 
+bact_genus$genus <- gsub("^f.*","", bact_genus$genus) 
+bact_genus$genus <- gsub("^$","Unclassified", bact_genus$genus)
+
+#format to data frame
+bact_genus_df <- as.data.frame(bact_genus)
+row.names(bact_genus_df) <- bact_genus_df$OTUID
+bact_genus_df <- bact_genus_df[, -1]
+
+#obtain treatment metadata from mapping file
+##create data set bacteria mapping file
+bact_mapping <- read_tsv("r_inputs/bact_mapping.txt") %>% 
+  select(SampleID, TrtForageQuality)
+
+##create data set bacteria extremes
+bact_extremes <- read_tsv("filter/total_extremes.txt", col_names = ("SampleID")) 
+
+#merge data sets 
+bact_trt <- left_join(bact_extremes, bact_mapping, by = "SampleID") 
+
+#remove samples 
+bact_trt <- bact_trt %>%
+  filter(SampleID != "8791.8.d63.20NormalMDGS" & SampleID != "8847.2.d63.HQ40MDGSNoRum" & SampleID != "8997.8.d63.20NormalMDGS")
+
+#transpose data set
+bact_trt_trans <- bact_trt %>%
+  t %>%
+  as.data.frame(stringsAsFactors=F)
+
+#set column names
+colnames(bact_trt_trans) = bact_trt_trans[1, ]
+bact_trt_trans = bact_trt_trans[-1, ]
+
+#add OTUID and genus columns to match relative abundance column headers
+bact_trt_trans <- bact_trt_trans %>%
+  mutate(genus = "genus") 
+
+#merge differentila OTUs and treatment metadata sets 
+bact_genus_trt <- rbind(bact_trt_trans, bact_genus_df) 
+trtnames <- bact_genus_trt[1,1:63]
+bact_genus_trt <- bact_genus_trt[-1,]
+bact_taxa <- subset(bact_genus_trt, select=c(genus))
+bact_samples = bact_genus_trt[,-64]
+colnames(bact_samples) <- trtnames
+bact_samples_trans <- as.data.frame(t(bact_samples), stringsAsFactors=F)
+
+#convert data frame to numeric
+bact_samples_trans[, 1:80] <- sapply(bact_samples_trans[, 1:80], as.numeric)
+
+#add a dendrogram for the samples
+#calculate the Bray-Curtis dissimilarity matrix on the full dataset
+data.dist <- vegdist(bact_samples_trans, method = "bray")
+
+#average linkage hierarchical clustering
+row.clus <- hclust(data.dist, "aver")
+
+#add a dendrogram for the taxa
+data.dist.g <- vegdist(t(bact_samples_trans), method = "bray")
+col.clus <- hclust(data.dist.g, "aver")
+
+#color palette
+scalewhiteblue <- colorRampPalette(c("white", "blue"), space = "rgb")(100)
+
+#generate figure
+pdf("figures/figure10a.pdf", height=8, width=9)
+heatmap.2(as.matrix(bact_samples_trans), Rowv = as.dendrogram(row.clus), Colv = as.dendrogram(col.clus), labCol="", xlab="OTUs", ylab="Forage Quality", col = scalewhiteblue, trace="none", density.info="none", margins = c(2, 6), lhei = c(2, 10))
+dev.off()
+
+#generate heatmap for subset data bacteria
+#determine the maximum relative abundance for each column
+maxab <- apply(bact_samples_trans, 2, max)
+
+#remove the genera with less than 1% as their maximum relative abundance
+n1 <- names(which(maxab < 0.01))
+bact_samples_filtered <- bact_samples_trans[, -which(names(bact_samples_trans) %in% n1)]
+
+#add a dendrogram for the samples
+#calculate the Bray-Curtis dissimilarity matrix on the full dataset
+data.dist_sub <- vegdist(bact_samples_filtered, method = "bray")
+
+#average linkage hierarchical clustering
+row.clus_sub <- hclust(data.dist_sub, "aver")
+
+#add a dendrogram for the taxa
+data.dist.g_sub <- vegdist(t(bact_samples_filtered), method = "bray")
+col.clus_sub <- hclust(data.dist.g_sub, "aver")
+
+#generate figure
+pdf("figures/figure10b.pdf", height=8, width=9)
+heatmap.2(as.matrix(bact_samples_filtered), Rowv = as.dendrogram(row.clus_sub), Colv = as.dendrogram(col.clus_sub), labCol=bact_taxa$genus, xlab="OTUs", ylab="Forage Quality", col = scalewhiteblue, trace="none", density.info="none", margins = c(7.5, 6), lhei = c(2, 10))
+dev.off()
+```

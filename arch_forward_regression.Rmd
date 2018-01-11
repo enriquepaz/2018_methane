@@ -1,0 +1,104 @@
+---
+Title: "arch_forward_regression"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+  keep_md: yes
+---
+
+Generate archaea test population.
+
+```{r, engine='bash'}  
+#create test data set
+filter_samples_from_otu_table.py -i biom_files/arch_relabun_otutable.biom --sample_id_fp filter/total_extremes.txt --negate_sample_id_fp -o biom_files/arch_relabun_test.biom
+
+#Convert from biom to txt format 
+biom convert -i biom_files/arch_relabun_test.biom --to-tsv --header-key taxonomy -o biom_files/arch_relabun_test.txt
+```
+
+Build model: select subset of predictor variables using forward stepwise regression.
+
+```{r} 
+library(tidyverse)
+library(data.table)
+library(car)
+
+##create bacteria relative abundance data set
+arch_relabun_test <- read_tsv("biom_files/arch_relabun_test.txt", skip=1)
+
+arch_relabun_test_samples <- arch_relabun_test %>% 
+  rename(OTUID = "#OTU ID") %>% 
+  select(-taxonomy)
+
+#arcsine square root transformation
+arch_arctrans <- arch_relabun_test_samples %>%
+  mutate_at(vars(-OTUID), funs(asin(sign(.) * sqrt(abs(.)))))
+
+##create archeria significant differentially abundant OTUs data set
+arch_diff_otus <- read_tsv("lefse/arch_differential_otus.txt", col_names="OTUID")
+
+#input archeria data set for forward regression 
+arch_diff_data <- left_join(arch_diff_otus, arch_arctrans, by = "OTUID") 
+
+arch_diff_data$OTUID <- paste("OTU", sep="", arch_diff_data$OTUID)
+
+arch_test_final <- arch_diff_data %>%
+  t %>%
+  as.data.frame(stringsAsFactors=F)
+
+#set column names
+colnames(arch_test_final) = arch_test_final[1, ]
+arch_test_final = arch_test_final[-1, ]
+
+#set row names to column
+arch_test_final <- setDT(arch_test_final, keep.rownames = TRUE)[]
+colnames(arch_test_final)[1] <- "SampleID"
+arch_test_final <- as.data.frame(arch_test_final)
+
+#convert data frame to numeric
+arch_test_final[, 2:20] <- sapply(arch_test_final[, 2:20], as.numeric)
+
+##create data set archera mapping
+arch_mapping <- read_tsv("r_inputs/arch_mapping.txt") %>% 
+  select(SampleID, MethaneRatioFinal)
+
+##archeria forward stepwise regression data set
+arch_stepwise <- left_join(arch_test_final, arch_mapping, by = "SampleID")
+
+arch_stepwise_final <- arch_stepwise %>% 
+  select(-SampleID) %>% 
+  na.omit()
+
+#archaea forward stepwise regression models 
+#methane ratio
+null_arch_ratio=lm(MethaneRatioFinal~1, data=arch_stepwise_final)
+#summary(null_arch_ratio)
+full_arch_ratio=lm(MethaneRatioFinal~., data=arch_stepwise_final)
+#summary(full_arch_ratio)
+step(null_arch_ratio, scope=list(lower=null_arch_ratio, upper=full_arch_ratio), direction="forward")
+
+#Model diagnostics
+model_arch_ratio <- lm(formula = MethaneRatioFinal ~ OTU124 + OTU188 + OTU1941 + OTU88, data = arch_stepwise_final)
+summary(model_arch_ratio)
+#anova(model_arch_ratio)
+
+#Test multi-collinearity (variance inflation factor)
+vif(model_arch_ratio)
+sqrt(vif(model_arch_ratio)) > 2
+
+#Homoscedasticity & Normality
+#generate figure
+pdf("figures/figure13.pdf", height=6, width=6)
+layout(matrix(c(1,2,3,4),2,2))
+plot(model_arch_ratio)
+dev.off()
+
+#Extract observed and predicted values
+OP_arch_ratio <- data.frame(Observed=arch_stepwise_final$MethaneRatioFinal, Predicted=fitted(model_arch_ratio))
+#Plot observed vs prediceted
+par(mfrow=c(1,1))
+plot(OP_arch_ratio$Predicted, OP_arch_ratio$Observed, xlab="Predicted Ratio (CH4/CO2)", ylab="Observed Ratio (CH4/CO2)")
+OP=lm(Observed~Predicted, data=OP_arch_ratio)
+abline(OP)
+#summary(OP)
+```

@@ -1,0 +1,99 @@
+---
+Title: "Generate OTU tables"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+    keep_md: yes
+---
+
+Generate OTU table for bacteria
+
+```{r, engine='bash'}
+#use a custom perl script to convert the fasta file from QIIME format to a format that works with vsearch pipeline to generate the OTU table
+
+chmod 775 scripts/qiime_to_usearch.pl
+
+#format bacteria file
+scripts/qiime_to_usearch.pl -fasta=bactqc_trim.rc.fasta -prefix=file
+
+#rename file
+mv format.fasta bact_format.fasta
+
+#make vsearch_outputs directory
+mkdir vsearch_outputs
+
+#vsearch pipeline
+#dereplicate sequences
+vsearch --derep_fulllength bact_format.fasta --sizeout --output vsearch_outputs/bact_derep.fasta
+
+#sort by decreasing abundance and remove singletons
+vsearch --sortbysize vsearch_outputs/bact_derep.fasta --minsize 2 --output vsearch_outputs/bact_derep_sort.fasta
+
+#de novo detection and sorting out of chimeras
+vsearch --uchime_denovo vsearch_outputs/bact_derep_sort.fasta --nonchimeras vsearch_outputs/bact_nonchim_denovo.fasta
+
+#decompress gold.fasta.gz
+gzip -d gold.fasta.gz
+
+#reference based and sorting out of chimeras
+vsearch --uchime_ref vsearch_outputs/bact_nonchim_denovo.fasta --db gold.fasta --nonchimeras vsearch_outputs/bact_nonchim_denovo_ref.fasta
+
+#sort by decreasing abundance
+vsearch -sortbysize vsearch_outputs/bact_nonchim_denovo_ref.fasta -output vsearch_outputs/bact_nonchim_denovo_refsort.fasta
+
+#cluster sequences at 97% identity
+vsearch --cluster_smallmem vsearch_outputs/bact_nonchim_denovo_refsort.fasta --id 0.97 --consout vsearch_outputs/bact_oturep.fasta --relabel OTU
+
+#format header
+awk 'BEGIN{OFS="";ORS="";count=1}{if ($0~/>/){if (NR>1) {print "\n"} print ">" count "\n"; count+=1;} else {print $0;}}' vsearch_outputs/bact_oturep.fasta > vsearch_outputs/bact_oturep_header.fasta
+
+#compare sequences using global pairwise alignment
+vsearch --usearch_global bact_format.fasta --db vsearch_outputs/bact_oturep_header.fasta --id 0.97 --uc vsearch_outputs/bact_map.uc
+
+#make otu_tables directory
+mkdir mkdir otu_tables
+
+#format OTU table
+chmod 775 scripts/*
+
+#change from uc to tab delimited format
+python scripts/uc2otutab.py vsearch_outputs/bact_map.uc > otu_tables/bact_otutable.txt
+```
+
+Generate OTU table for archaea
+
+```{r, engine='bash'}
+#format archeae file
+scripts/qiime_to_usearch.pl -fasta=archqc_trim.rc.fasta -prefix=file
+
+#rename file
+mv format.fasta arch_format.fasta
+
+#vsearch pipeline
+#dereplicate sequences
+vsearch --derep_fulllength arch_format.fasta --sizeout --output vsearch_outputs/arch_derep.fasta
+
+#sort by decreasing abundance and remove singletons
+vsearch --sortbysize vsearch_outputs/arch_derep.fasta --minsize 2 --output vsearch_outputs/arch_derep_sort.fasta
+
+#de novo detection and sorting out of chimeras
+vsearch --uchime_denovo vsearch_outputs/arch_derep_sort.fasta --nonchimeras vsearch_outputs/arch_nonchim_denovo.fasta
+
+#reference based and sorting out of chimeras
+vsearch --uchime_ref vsearch_outputs/arch_nonchim_denovo.fasta --db gold.fasta --nonchimeras vsearch_outputs/arch_nonchim_denovo_ref.fasta
+
+#sort by decreasing abundance
+vsearch -sortbysize vsearch_outputs/arch_nonchim_denovo_ref.fasta -output vsearch_outputs/arch_nonchim_denovo_refsort.fasta
+
+#cluster sequences at 97% identity
+vsearch --cluster_smallmem vsearch_outputs/arch_nonchim_denovo_refsort.fasta --id 0.97 --consout vsearch_outputs/arch_oturep.fasta --relabel OTU
+
+#format header
+awk 'BEGIN{OFS="";ORS="";count=1}{if ($0~/>/){if (NR>1) {print "\n"} print ">" count "\n"; count+=1;} else {print $0;}}' vsearch_outputs/arch_oturep.fasta > vsearch_outputs/arch_oturep_header.fasta
+
+#compare sequences using global pairwise alignment
+vsearch --usearch_global arch_format.fasta --db vsearch_outputs/arch_oturep_header.fasta --id 0.97 --uc vsearch_outputs/arch_map.uc
+
+#change from uc to tab delimited format
+python scripts/uc2otutab.py vsearch_outputs/arch_map.uc > otu_tables/arch_otutable.txt
+```

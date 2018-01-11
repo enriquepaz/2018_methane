@@ -1,0 +1,104 @@
+---
+Title: "bact_forward_regression"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+  keep_md: yes
+---
+
+Generate bacteria test population.
+
+```{r, engine='bash'}  
+#create test data set
+filter_samples_from_otu_table.py -i biom_files/bact_relabun_otutable.biom --sample_id_fp filter/total_extremes.txt --negate_sample_id_fp -o biom_files/bact_relabun_test.biom
+
+#Convert from biom to txt format 
+biom convert -i biom_files/bact_relabun_test.biom --to-tsv --header-key taxonomy -o biom_files/bact_relabun_test.txt
+```
+
+Build model: select subset of predictor variables using forward stepwise regression.
+
+```{r} 
+library(tidyverse)
+library(data.table)
+library(car)
+
+##create bacteria relative abundance data set
+bact_relabun_test <- read_tsv("biom_files/bact_relabun_test.txt", skip=1)
+
+bact_relabun_test_samples <- bact_relabun_test %>% 
+  rename(OTUID = "#OTU ID") %>% 
+  select(-taxonomy)
+
+#arcsine square root transformation
+bact_arc <- bact_relabun_test_samples %>%
+  mutate_at(vars(-OTUID), funs(asin(sign(.) * sqrt(abs(.)))))
+
+##create bacteria significant differentially abundant OTUs data set
+bact_diff_otus <- read_tsv("lefse/bact_differential_otus.txt", col_names="OTUID")
+
+#input bacteria data set for forward regression 
+bact_diff_data <- left_join(bact_diff_otus, bact_arc, by = "OTUID") 
+
+bact_diff_data$OTUID <- paste("OTU", sep="", bact_diff_data$OTUID)
+
+bact_test_final <- bact_diff_data %>%
+  t %>%
+  as.data.frame(stringsAsFactors=F)
+
+#set column names
+colnames(bact_test_final) = bact_test_final[1, ]
+bact_test_final = bact_test_final[-1, ]
+
+#set row names to column
+bact_test_final <- setDT(bact_test_final, keep.rownames = TRUE)[]
+colnames(bact_test_final)[1] <- "SampleID"
+bact_test_final <- as.data.frame(bact_test_final)
+
+#convert data frame to numeric
+bact_test_final[, 2:81] <- sapply(bact_test_final[, 2:81], as.numeric)
+
+##create data set bactera mapping
+bact_mapping <- read_tsv("r_inputs/bact_mapping.txt") %>% 
+  select(SampleID, MethaneRatioFinal)
+
+##bacteria forward stepwise regression data set
+bact_stepwise <- left_join(bact_test_final, bact_mapping, by = "SampleID")
+
+bact_stepwise_final <- bact_stepwise %>% 
+  select(-SampleID) %>% 
+  na.omit()
+
+#bacteria forward stepwise regression models 
+#methane ratio
+null_bact_ratio=lm(MethaneRatioFinal~1, data=bact_stepwise_final)
+#summary(null_bact_ratio)
+full_bact_ratio=lm(MethaneRatioFinal~., data=bact_stepwise_final)
+#summary(full_bact_ratio)
+step(null_bact_ratio, scope=list(lower=null_bact_ratio, upper=full_bact_ratio), direction="forward")
+
+#Model diagnostics
+model_bact_ratio <- lm(formula = MethaneRatioFinal ~ OTU48 + OTU108 + OTU8318 + OTU97 + OTU3373 + OTU30 + OTU10371 + OTU4 + OTU320 + OTU190 + OTU683 + OTU28, data = bact_stepwise_final)
+summary(model_bact_ratio)
+#anova(model_bact_ratio)
+
+#Test multi-collinearity (variance inflation factor)
+vif(model_bact_ratio)
+sqrt(vif(model_bact_ratio)) > 2
+
+#Homoscedasticity & Normality
+#generate figure
+pdf("figures/figure12.pdf", height=6, width=6)
+layout(matrix(c(1,2,3,4),2,2))
+plot(model_bact_ratio)
+dev.off()
+
+#Extract observed and predicted values
+OP_bacteria_ratio <- data.frame(Observed=bact_stepwise_final$MethaneRatioFinal, Predicted=fitted(model_bact_ratio))
+#Plot observed vs prediceted
+par(mfrow=c(1,1))
+plot(OP_bacteria_ratio$Predicted, OP_bacteria_ratio$Observed, xlab="Predicted Ratio (CH4/CO2)", ylab="Observed Ratio (CH4/CO2)")
+OP=lm(Observed~Predicted, data=OP_bacteria_ratio)
+abline(OP)
+#summary(OP)
+```

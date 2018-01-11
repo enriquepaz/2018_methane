@@ -1,0 +1,91 @@
+---
+Title: "Assign Taxonomy and Perform Alignment for Archaea Sequences"
+Author: Henry Paz (henry.paz@huskers.unl.edu)
+Output:
+  html_document:
+    keep_md: yes
+---
+
+Assing taxonomy to the OTUs representative sequences using Greengenes database (gg_13_8_otus) as reference.
+
+```{r, engine='bash'}
+#assign taxonomy
+assign_taxonomy.py -i vsearch_outputs/arch_oturep_header.fasta -t anaconda/envs/bioinfo/lib/python2.7/site-packages/qiime_default_reference/gg_13_8_otus/taxonomy/97_otu_taxonomy.txt -r anaconda/envs/bioinfo/lib/python2.7/site-packages/qiime_default_reference/gg_13_8_otus/rep_set/97_otus.fasta -m mothur -o arch_ggtaxa
+```
+
+Retain OTUs present in both the OTU table and the OTUs representative sequence set.
+
+```{r}
+arch_oturep <- read.table("arch_ggtaxa/arch_oturep_header_tax_assignments.txt", header=F, sep="\t")
+arch_table <- read.table("otu_tables/arch_otutable.txt", header=T, sep="\t")
+
+matched_otus <- arch_oturep[which(arch_oturep$V1 %in% arch_table$OTUId),]
+write.table(matched_otus, sep="\t", file="r_outputs/arch_oturep_tax_assignments_filtered.txt", col.names=F, row.names=F)
+```
+
+Add the assigned taxa to the OTU table with the column header "taxonomy" and output the resulting file in biom format.
+
+```{r, engine='bash'}
+#add the assigned taxonomy to OTU table
+awk 'NR == 1; NR > 1 {print $0 | "sort -n"}' otu_tables/arch_otutable.txt > arch_ggtaxa/arch_otutablesort.txt 
+ 
+sort -n r_outputs/arch_oturep_tax_assignments_filtered.txt > arch_ggtaxa/arch_oturep_tax_assignments_filtered_sort.txt
+
+{ printf '\ttaxonomy\t\t\n'; cat arch_ggtaxa/arch_oturep_tax_assignments_filtered_sort.txt ; } > arch_ggtaxa/arch_oturep_tax_assignments_filtered_sort_label.txt
+
+paste arch_ggtaxa/arch_otutablesort.txt <(cut -f 2 arch_ggtaxa/arch_oturep_tax_assignments_filtered_sort_label.txt) > biom_files/arch_otutable_tax.txt
+
+#convert to biom format
+biom convert -i biom_files/arch_otutable_tax.txt --table-type "OTU table" --process-obs-metadata taxonomy --to-json -o biom_files/arch_otutable_tax.biom 
+```
+
+Align sequences and view the alignment summary.
+
+```{r, engine='bash'}
+#align sequences and view the alignment summary
+mothur "#align.seqs(fasta=vsearch_outputs/arch_oturep_header.fasta, reference=silva/silva.nr_v128.align)"
+
+mothur "#summary.seqs(fasta=vsearch_outputs/arch_oturep_header.align)"
+```
+
+Identify OTUs that aligned properly.
+
+```{r}
+summaryarch <- read.table("vsearch_outputs/arch_oturep_header.summary", header=T, sep="\t")
+
+summaryarch_sub <- subset(summaryarch, (start >= 22500 & start <= 24000) & end == 28437, select=seqname)
+
+write.table(summaryarch_sub, file="r_outputs/proper_aligned_otus_arch.txt", col.names=F, row.names=F)
+```
+
+Remove those OTUs that did not align properly from the OTU table and then remove OTUs with Bacteria and Unknown classifications. VSEARCH pipeline should have removed sinlgeton OTUs, but double check with the "-n 2 parameter". In addition, the OTU table contains additinal samples not part of the current analysis that need to be filtered. 
+
+```{r, engine='bash'}
+#filter OTUs that did not align properly and singletons
+filter_otus_from_otu_table.py -i biom_files/arch_otutable_tax.biom -n 2 -e r_outputs/proper_aligned_otus_arch.txt --negate_ids_to_exclude -o biom_files/arch_otutable_tax_align.biom
+
+#filter OTUs with Bacteria and Unkown classifications 
+#convert to txt format
+biom convert -i biom_files/arch_otutable_tax_align.biom -o biom_files/arch_otutable_tax_align.txt --to-tsv --header-key taxonomy
+
+#filter with Bacteria classification 
+grep -v "k__Bacteria" biom_files/arch_otutable_tax_align.txt > biom_files/arch_otutable_bact.txt
+
+#convert to biom format
+biom convert -i biom_files/arch_otutable_bact.txt --table-type "OTU table" --process-obs-metadata taxonomy --to-json -o biom_files/arch_otutable_bact.biom 
+
+#filter samples not part of the analysis
+filter_samples_from_otu_table.py -i biom_files/arch_otutable_bact.biom --sample_id_fp filter/arch_filter_samples.txt --negate_sample_id_fp -o biom_files/arch_otutable_final.biom
+```
+
+Use the aligned file to generate a phylogenetic tree using clearcut in mothur. Note that using the unfiltered aligned file does not affect downstream results. Clearcut requires ID lengths greater than ~10 characters, thus add 10 ’A’s to the front of all sequence names. Then remove the ’A’s from the generated phylogenetic tree.
+
+```{r, engine='bash'}
+sed -i -e 's/>/>AAAAAAAAAA/g' vsearch_outputs/arch_oturep_header.align
+
+mothur "#dist.seqs(fasta=vsearch_outputs/arch_oturep_header.align, output=lt)"
+
+mothur "#clearcut(phylip=vsearch_outputs/arch_oturep_header.phylip.dist)"
+
+sed -i -e 's/AAAAAAAAAA//g' vsearch_outputs/arch_oturep_header.phylip.tre
+```
