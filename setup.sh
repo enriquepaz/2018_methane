@@ -22,6 +22,9 @@ anaconda/bin/conda create -y -n bioinfo --file setup/qiime_lefse_pkgs.txt -c bio
 #activate environment
 source anaconda/bin/activate bioinfo
 
+#install r packages
+conda install -c conda-forge pandoc
+
 #install
 wget https://github.com/mothur/mothur/releases/download/v1.39.5/Mothur.linux_64.zip
 unzip Mothur.linux_64.zip

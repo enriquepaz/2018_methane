@@ -85,7 +85,6 @@ r-nloptr=1.0.4=r3.4.1_2
 r-nnet=7.3_12=r3.4.1_0
 r-openssl=0.9.6=r3.4.1_0
 r-pbkrtest=0.4_7=r3.4.1_0
-r-permute=0.9_4=0
 r-pkgconfig=2.0.1=r3.4.1_0
 r-plogr=0.1_1=r3.4.1_0
 r-plyr=1.8.4=r3.4.1_0
