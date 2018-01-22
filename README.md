@@ -32,5 +32,5 @@ To render an R markdown file:
 
 - change to the 2018_methane_growing_steers directory 
 - source anaconda/bin/activate bioinfo
-- anaconda/envs/stats/bin/Rscript -e "rmarkdown::render('**[1-14]**')"
+- anaconda/envs/stats/bin/Rscript -e "rmarkdown::render('**[1-14]**')" (replace [1-14] with the name of the markdown file) 
 
