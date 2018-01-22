@@ -52,7 +52,7 @@ anaconda/bin/conda create -y -n stats --file setup/r_pkgs.txt -c bioconda -c r -
 source anaconda/bin/activate stats
 
 #install r packages
-conda install -c bioconda r-vegan
+conda install -c conda-forge r-vegan 
 
 source deactivate
 
