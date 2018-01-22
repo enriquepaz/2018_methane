@@ -7,7 +7,7 @@ Setup the same environments used to analyze the data by cloning the GitHub repos
 
 - git clone https://github.com/enriquepaz/2018_methane_growing_steers.git
 - cd 2018_methane_growing_steers
-- ./setup.sh
+- bash setup.sh
 
 ## Render R Markdown files
 

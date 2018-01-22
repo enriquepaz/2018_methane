@@ -43,7 +43,7 @@ rm -rf fastx
 
 source deactivate
 
-anaconda/bin/conda create -y -n stats --file setup/r_packages.txt -c bioconda -c r -c biobuilds
+anaconda/bin/conda create -y -n stats --file setup/r_pkgs.txt -c bioconda -c r -c biobuilds
 
 #sra 
 wget ftp-trace.ncbi.nlm.nih.gov/sra/sdk/current/sratoolkit.current-centos_linux64.tar.gz
