@@ -32,8 +32,8 @@ rm -r mothur
 rm -r __MACOSX
 
 #install
-mkdir fastx2
-cd fastx2
+mkdir fastx
+cd fastx
 wget http://hannonlab.cshl.edu/fastx_toolkit/fastx_toolkit_0.0.13_binaries_Linux_2.6_amd64.tar.bz2
 bzip2 -d fastx_toolkit_0.0.13_binaries_Linux_2.6_amd64.tar.bz2
 tar -xvf fastx_toolkit_0.0.13_binaries_Linux_2.6_amd64.tar

@@ -74,7 +74,6 @@ r-markdown=0.8=r3.4.1_0
 r-mass=7.3_47=r3.4.1_0
 r-matrix=1.2_10=r3.4.1_0
 r-matrixmodels=0.4_1=r3.4.1_0
-r-matrixstats=0.52.2=r3.4.1_0
 r-mgcv=1.8_17=r3.4.1_0
 r-mime=0.5=r3.4.1_0
 r-minqa=1.2.4=r3.4.1_2
