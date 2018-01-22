@@ -5,9 +5,9 @@
 
 # ensure pwd is the cloned repository
 result=${PWD##*/}
-if [ "$result" != "2018_methane_growing_steers" ]
+if [ "$result" != "2018_methane" ]
 then
-	printf "\nCurrent directory is not the cloned repository.\nSee https://github.com/enriquepaz/2018_methane_growing_steers for details.\n\n"
+	printf "\nCurrent directory is not the cloned repository.\nSee https://github.com/enriquepaz/2018_methane for details.\n\n"
 	exit 1
 fi
 
