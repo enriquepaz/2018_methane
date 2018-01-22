@@ -1,5 +1,5 @@
 :computer: :bar_chart:
-Analyses to recreate the results in the manuscript **"XXX"** by XXX et al. 2018 in XXX. The analyses are separated into several R Markdown files.
+Analyses to recreate the results in the manuscript **"XXX"** by XXX et al. 2018 in XXX. The analyses are setup to run in a Linux environment and are separated into several R Markdown files.
 
 ## Create environments
 
