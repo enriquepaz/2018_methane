@@ -5,7 +5,7 @@ Analyses to recreate the results in the manuscript **"XXX"** by XXX et al. 2018 
 
 Setup the same environments used to analyze the data by cloning the GitHub repository and running the setup.sh script as follows:
 
-- git clone https://github.com/enriquepaz/2018_methane_growing_steers.git
+- git clone https://github.com/enriquepaz/2018_methane.git
 - cd 2018_methane_growing_steers
 - bash setup.sh
 
@@ -30,7 +30,7 @@ Adhere to the delineated order as succeeding R Markdown files depend on previous
 
 To render an R markdown file: 
 
-- change to the 2018_methane_growing_steers directory 
+- change to the 2018_methane directory 
 - source anaconda/bin/activate bioinfo
 - anaconda/envs/stats/bin/Rscript -e "rmarkdown::render('**[1-14]**')" (replace [1-14] with the name of the markdown file) 
 
