@@ -23,7 +23,7 @@ anaconda/bin/conda create -y -n bioinfo --file setup/qiime_lefse_pkgs.txt -c bio
 source anaconda/bin/activate bioinfo
 
 #install r packages
-conda install -c conda-forge pandoc
+conda install -y -c conda-forge pandoc
 
 #install
 wget https://github.com/mothur/mothur/releases/download/v1.39.5/Mothur.linux_64.zip
@@ -47,6 +47,14 @@ rm -rf fastx
 source deactivate
 
 anaconda/bin/conda create -y -n stats --file setup/r_pkgs.txt -c bioconda -c r -c biobuilds
+
+#activate environment
+source anaconda/bin/activate stats
+
+#install r packages
+conda install -c bioconda r-vegan
+
+source deactivate
 
 #sra 
 wget ftp-trace.ncbi.nlm.nih.gov/sra/sdk/current/sratoolkit.current-centos_linux64.tar.gz
