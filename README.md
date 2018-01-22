@@ -9,7 +9,7 @@ Setup the same environments used to analyze the data by cloning the GitHub repos
 - cd 2018_methane_growing_steers
 - ./setup.sh
 
-## Render R Markdown files**
+## Render R Markdown files
 
 Adhere to the delineated order as succeeding R Markdown files depend on previous results. X11 forwarding may be needed if working remotely.
 
