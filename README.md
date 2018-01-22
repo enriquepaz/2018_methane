@@ -1,7 +1,7 @@
 :computer: :bar_chart:
 Analyses to recreate the results in the manuscript **"XXX"** by XXX et al. 2018 in XXX. The analyses are separated into several R Markdown files.
 
-**Create environments**
+## Create environments
 
 Setup the same environments used to analyze the data by cloning the GitHub repository and running the setup.sh script as follows:
 
