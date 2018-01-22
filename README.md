@@ -1,7 +1,7 @@
 :computer: :bar_chart:
 Analyses to recreate the results in the manuscript **"XXX"** by XXX et al. 2018 in XXX. The analyses are separated into several R Markdown files.
 
-**Create the environment**
+**Create environments**
 
 Setup the same environments used to analyze the data by cloning the GitHub repository and running the setup.sh script as follows:
 
@@ -9,7 +9,7 @@ Setup the same environments used to analyze the data by cloning the GitHub repos
 - cd 2018_methane_growing_steers
 - ./setup.sh
 
-**Render the R Markdown files**
+**Render R Markdown files**
 
 Adhere to the delineated order as succeeding R Markdown files depend on previous results. X11 forwarding may be needed if working remotely.
 
@@ -24,9 +24,9 @@ Adhere to the delineated order as succeeding R Markdown files depend on previous
     9. arch_taxa_beta_diversity.Rmd
     10. discovery_samples.Rmd
     11. bact_differential_otus.Rmd
-    12.	arch_differential_otus.Rmd
-    13.	bact_forward_regression.Rmd
-    14.arch_forward_regression.Rmd
+    12. arch_differential_otus.Rmd
+    13. bact_forward_regression.Rmd
+    14. arch_forward_regression.Rmd
 
 To render an R markdown file: 
 
