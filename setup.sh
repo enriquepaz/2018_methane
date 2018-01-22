@@ -60,3 +60,4 @@ source deactivate
 wget ftp-trace.ncbi.nlm.nih.gov/sra/sdk/current/sratoolkit.current-centos_linux64.tar.gz
 tar -xzf sratoolkit.current-centos_linux64.tar.gz
 rm sratoolkit.current-centos_linux64.tar.gz
+
