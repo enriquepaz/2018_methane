@@ -6,7 +6,7 @@ Analyses to recreate the results in the manuscript **"XXX"** by XXX et al. 2018 
 Setup the same environments used to analyze the data by cloning the GitHub repository and running the setup.sh script as follows:
 
 - git clone https://github.com/enriquepaz/2018_methane.git
-- cd 2018_methane_growing_steers
+- cd 2018_methane
 - bash setup.sh
 
 ## Render R Markdown files
